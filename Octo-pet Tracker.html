@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Octo-pet · GitHub Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #e7e2d7; font-family: 'Space Grotesk', -apple-system, system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  #root { height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="lib/ios-frame.jsx"></script>
+<script type="text/babel" src="lib/design-canvas.jsx"></script>
+<script type="text/babel" src="lib/data.jsx"></script>
+<script type="text/babel" src="lib/ui.jsx"></script>
+<script type="text/babel" src="lib/creature.jsx"></script>
+<script type="text/babel" src="lib/creature-variants.jsx"></script>
+<script type="text/babel" src="lib/screens.jsx"></script>
+
+<script type="text/babel">
+/* global React, ReactDOM, IOSDevice, DesignCanvas, DCSection, DCArtboard, DCPostIt,
+   OnboardingScreen, HomeScreen, GoalsScreen, BadgesScreen, ProfileScreen,
+   MOCK_USER, MOCK_STATS, generateContributionGrid, CreatureStages,
+   Creature, TOKENS, TabBar */
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "petFamily": "octo",
+  "creatureStage": "fledgling",
+  "creatureMood": "happy",
+  "totalContributions": 342,
+  "currentStreak": 23,
+  "showTabBar": true
+}/*EDITMODE-END*/;
+
+const grid = generateContributionGrid();
+
+// Screen wrapper — mounts a screen inside an iOS frame, with fixed tab bar
+function ScreenFrame({ activeTab = 'home', children, showTab = true, width = 300, height = 640 }) {
+  return (
+    <IOSDevice width={width} height={height}>
+      <div style={{ position: 'relative', height: '100%', overflow: 'hidden' }}>
+        {children}
+        {showTab && <TabBar active={activeTab} onChange={() => {}}/>}
+      </div>
+    </IOSDevice>
+  );
+}
+
+// Interactive prototype: 5 screens, tabbed
+function InteractivePrototype({ width = 340, height = 720 }) {
+  const [tab, setTab] = React.useState('home');
+  const [onboarded, setOnboarded] = React.useState(true);
+  const [tweaks, setTweaks] = React.useState(TWEAK_DEFAULTS);
+  const [editMode, setEditMode] = React.useState(false);
+
+  // Edit mode handshake
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      if (!e.data) return;
+      if (e.data.type === '__activate_edit_mode') setEditMode(true);
+      if (e.data.type === '__deactivate_edit_mode') setEditMode(false);
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  const updateTweak = (key, val) => {
+    const next = { ...tweaks, [key]: val };
+    setTweaks(next);
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [key]: val } }, '*');
+  };
+
+  const state = {
+    family: tweaks.petFamily,
+    stage: tweaks.creatureStage,
+    mood: tweaks.creatureMood,
+    stats: {
+      ...MOCK_STATS,
+      totalContributions: tweaks.totalContributions,
+      currentStreak: tweaks.currentStreak,
+    },
+  };
+
+  if (!onboarded) {
+    return (
+      <IOSDevice width={width} height={height}>
+        <OnboardingScreen family={tweaks.petFamily} onComplete={() => setOnboarded(true)}/>
+      </IOSDevice>
+    );
+  }
+
+  const screen =
+    tab === 'home'    ? <HomeScreen state={state} grid={grid}/> :
+    tab === 'goals'   ? <GoalsScreen stats={state.stats}/> :
+    tab === 'badges'  ? <BadgesScreen/> :
+    tab === 'profile' ? <ProfileScreen state={state} grid={grid}/> :
+    null;
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <IOSDevice width={width} height={height}>
+        <div style={{ position: 'relative', height: '100%', overflow: 'hidden' }}>
+          {screen}
+          <TabBar active={tab} onChange={setTab}/>
+        </div>
+      </IOSDevice>
+
+      {editMode && (
+        <TweaksPanel tweaks={tweaks} updateTweak={updateTweak} onResetOnboarding={() => setOnboarded(false)}/>
+      )}
+    </div>
+  );
+}
+
+function TweaksPanel({ tweaks, updateTweak, onResetOnboarding }) {
+  return (
+    <div style={{
+      position: 'fixed', top: 20, right: 20, zIndex: 200,
+      width: 260, background: '#fff', borderRadius: 16,
+      boxShadow: '0 10px 40px rgba(0,0,0,0.15), 0 2px 6px rgba(0,0,0,0.08)',
+      border: '1px solid #eee',
+      fontFamily: 'Space Grotesk, system-ui, sans-serif',
+      padding: 16, color: '#1a1a1a',
+    }}>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 8, height: 8, borderRadius: 4, background: 'oklch(0.62 0.12 140)' }}/>
+        Tweaks
+      </div>
+
+      <TweakRow label="Pet family">
+        <div style={{ display: 'flex', gap: 4 }}>
+          {PetFamilies.map(f => (
+            <button key={f.id} onClick={() => updateTweak('petFamily', f.id)} style={{
+              flex: 1, padding: '6px 4px', borderRadius: 8,
+              border: '1px solid ' + (tweaks.petFamily === f.id ? '#1a1a1a' : '#eee'),
+              background: tweaks.petFamily === f.id ? '#1a1a1a' : '#faf7f2',
+              color: tweaks.petFamily === f.id ? '#fff' : '#1a1a1a',
+              fontFamily: 'inherit', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            }}>{f.name.replace('-pet', '').replace('Pixel ', '')}</button>
+          ))}
+        </div>
+      </TweakRow>
+
+      <TweakRow label="Pet stage">
+        <select value={tweaks.creatureStage} onChange={e => updateTweak('creatureStage', e.target.value)} style={selectStyle}>
+          {CreatureStages.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+        </select>
+      </TweakRow>
+
+      <TweakRow label="Mood">
+        <select value={tweaks.creatureMood} onChange={e => updateTweak('creatureMood', e.target.value)} style={selectStyle}>
+          <option value="happy">happy</option>
+          <option value="neutral">neutral</option>
+          <option value="hungry">hungry</option>
+          <option value="sleeping">sleeping</option>
+          <option value="excited">excited</option>
+        </select>
+      </TweakRow>
+
+      <TweakRow label={`Contributions · ${tweaks.totalContributions}`}>
+        <input type="range" min="0" max="600" value={tweaks.totalContributions}
+          onChange={e => updateTweak('totalContributions', +e.target.value)} style={{ width: '100%' }}/>
+      </TweakRow>
+
+      <TweakRow label={`Streak · ${tweaks.currentStreak}d`}>
+        <input type="range" min="0" max="60" value={tweaks.currentStreak}
+          onChange={e => updateTweak('currentStreak', +e.target.value)} style={{ width: '100%' }}/>
+      </TweakRow>
+
+      <button onClick={onResetOnboarding} style={{
+        width: '100%', marginTop: 8, padding: '8px 12px',
+        border: '1px solid #eee', borderRadius: 8, background: '#faf7f2',
+        fontFamily: 'inherit', fontSize: 12, cursor: 'pointer', color: '#1a1a1a',
+      }}>
+        Replay onboarding
+      </button>
+    </div>
+  );
+}
+
+const selectStyle = {
+  width: '100%', padding: '6px 8px', borderRadius: 8,
+  border: '1px solid #eee', fontFamily: 'inherit', fontSize: 13, background: '#faf7f2',
+};
+
+function TweakRow({ label, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: 500, color: '#777', marginBottom: 4, letterSpacing: 0.2 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+// Static frame of a single screen (for canvas artboards)
+function StaticScreen({ kind, width = 300, height = 640, stage = 'fledgling', mood = 'happy', family = 'octo' }) {
+  const state = { stage, mood, stats: MOCK_STATS, family };
+  const body =
+    kind === 'onboarding' ? <OnboardingScreen onComplete={() => {}}/> :
+    kind === 'home'       ? <HomeScreen state={state} grid={grid}/> :
+    kind === 'goals'      ? <GoalsScreen stats={state.stats}/> :
+    kind === 'badges'     ? <BadgesScreen/> :
+    kind === 'profile'    ? <ProfileScreen state={state} grid={grid}/> :
+    null;
+  const activeTab = kind === 'home' ? 'home' : kind === 'goals' ? 'goals' : kind === 'badges' ? 'badges' : kind === 'profile' ? 'profile' : '';
+  return (
+    <IOSDevice width={width} height={height}>
+      <div style={{ position: 'relative', height: '100%', overflow: 'hidden' }}>
+        {body}
+        {kind !== 'onboarding' && <TabBar active={activeTab} onChange={() => {}}/>}
+      </div>
+    </IOSDevice>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// App: design canvas with 2 sections — prototype + individual screens
+// ─────────────────────────────────────────────────────────────
+function App() {
+  return (
+    <DesignCanvas>
+      <DCSection id="prototype" title="Octo-pet · Interactive prototype" subtitle="Tap tabs to navigate · open Tweaks to change state">
+        <DCArtboard id="live" label="Live prototype" width={340} height={720}>
+          <div data-screen-label="Interactive prototype" style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0eee9' }}>
+            <InteractivePrototype width={340} height={720}/>
+          </div>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="flow" title="Screen flow" subtitle="Each screen, standalone">
+        <DCArtboard id="onboarding" label="01 · Onboarding" width={300} height={640}>
+          <div data-screen-label="01 Onboarding" style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0eee9' }}>
+            <StaticScreen kind="onboarding" width={300} height={640}/>
+          </div>
+        </DCArtboard>
+        <DCArtboard id="home" label="02 · Home" width={300} height={640}>
+          <div data-screen-label="02 Home" style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0eee9' }}>
+            <StaticScreen kind="home" width={300} height={640}/>
+          </div>
+        </DCArtboard>
+        <DCArtboard id="goals" label="03 · Goals" width={300} height={640}>
+          <div data-screen-label="03 Goals" style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0eee9' }}>
+            <StaticScreen kind="goals" width={300} height={640}/>
+          </div>
+        </DCArtboard>
+        <DCArtboard id="badges" label="04 · Achievements" width={300} height={640}>
+          <div data-screen-label="04 Achievements" style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0eee9' }}>
+            <StaticScreen kind="badges" width={300} height={640}/>
+          </div>
+        </DCArtboard>
+        <DCArtboard id="profile" label="05 · Profile" width={300} height={640}>
+          <div data-screen-label="05 Profile" style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0eee9' }}>
+            <StaticScreen kind="profile" width={300} height={640}/>
+          </div>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="families" title="Pet families" subtitle="Three distinct companions — same growth system">
+        {PetFamilies.map(f => (
+          <DCArtboard key={f.id} id={f.id} label={f.name} width={220} height={300}>
+            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div style={{
+                flex: 1,
+                background: f.id === 'octo' ? 'linear-gradient(180deg, oklch(0.88 0.05 140) 0%, #faf7f2 100%)'
+                  : f.id === 'robo' ? 'linear-gradient(180deg, oklch(0.9 0.03 230) 0%, #faf7f2 100%)'
+                  : 'linear-gradient(180deg, oklch(0.9 0.05 285) 0%, #faf7f2 100%)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <PetByFamily family={f.id} stage="fledgling" mood="happy" size={160}/>
+              </div>
+              <div style={{ padding: '12px 16px 14px', background: '#fff', borderTop: '1px solid #ebe4d5' }}>
+                <div style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: '#7a7a7a', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
+                  Family
+                </div>
+                <div style={{ fontSize: 17, fontWeight: 700, color: '#1a1a1a', letterSpacing: -0.3 }}>
+                  {f.name}
+                </div>
+                <div style={{ fontSize: 12, color: '#7a7a7a', marginTop: 2 }}>{f.desc}</div>
+              </div>
+            </div>
+          </DCArtboard>
+        ))}
+      </DCSection>
+
+      <DCSection id="evolution-octo" title="Octo-pet evolution" subtitle="Stages 1–5 · 0, 10, 50, 200, 500 contributions">
+        {CreatureStages.map((s, i) => (
+          <DCArtboard key={s.name} id={'octo-' + s.name} label={`${i + 1} · ${s.name} · ${s.min}+`} width={200} height={260}>
+            <div style={{ width: '100%', height: '100%', background: 'linear-gradient(180deg, oklch(0.88 0.05 140) 0%, #faf7f2 100%)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <Creature stage={s.name} mood="happy" size={140}/>
+              <div style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: '#7a7a7a', textTransform: 'uppercase', letterSpacing: 1 }}>{s.min}+ contribs</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a1a', textTransform: 'capitalize' }}>{s.name}</div>
+            </div>
+          </DCArtboard>
+        ))}
+      </DCSection>
+
+      <DCSection id="evolution-robo" title="Robo-pet evolution" subtitle="Capsule → boot-up → chassis → mech → core">
+        {CreatureStages.map((s, i) => (
+          <DCArtboard key={s.name} id={'robo-' + s.name} label={`${i + 1} · ${s.name} · ${s.min}+`} width={200} height={260}>
+            <div style={{ width: '100%', height: '100%', background: 'linear-gradient(180deg, oklch(0.9 0.03 230) 0%, #faf7f2 100%)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <RoboPet stage={s.name} mood="happy" size={140}/>
+              <div style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: '#7a7a7a', textTransform: 'uppercase', letterSpacing: 1 }}>{s.min}+ contribs</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a1a', textTransform: 'capitalize' }}>{s.name}</div>
+            </div>
+          </DCArtboard>
+        ))}
+      </DCSection>
+
+      <DCSection id="evolution-slime" title="Pixel Slime evolution" subtitle="8-bit pet that gains crown + gem over time">
+        {CreatureStages.map((s, i) => (
+          <DCArtboard key={s.name} id={'slime-' + s.name} label={`${i + 1} · ${s.name} · ${s.min}+`} width={200} height={260}>
+            <div style={{ width: '100%', height: '100%', background: 'linear-gradient(180deg, oklch(0.9 0.05 285) 0%, #faf7f2 100%)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <PixelSlime stage={s.name} mood="happy" size={140}/>
+              <div style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: '#7a7a7a', textTransform: 'uppercase', letterSpacing: 1 }}>{s.min}+ contribs</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a1a', textTransform: 'capitalize' }}>{s.name}</div>
+            </div>
+          </DCArtboard>
+        ))}
+      </DCSection>
+
+      <DCSection id="moods" title="Mood reactions" subtitle="Each family expresses the 5 mood states differently">
+        {['happy', 'neutral', 'hungry', 'sleeping', 'excited'].map(m => (
+          <DCArtboard key={m} id={m} label={m} width={300} height={180}>
+            <div style={{ width: '100%', height: '100%', background: '#faf7f2', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '4px 8px' }}>
+                <Creature stage="fledgling" mood={m} size={84}/>
+                <RoboPet stage="fledgling" mood={m} size={84}/>
+                <PixelSlime stage="fledgling" mood={m} size={84}/>
+              </div>
+              <div style={{ padding: '8px 14px 12px', borderTop: '1px solid #ebe4d5', background: '#fff' }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a', textTransform: 'capitalize' }}>{m}</div>
+              </div>
+            </div>
+          </DCArtboard>
+        ))}
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

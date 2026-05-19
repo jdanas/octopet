@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/*.iml
+android/**/*.iml
+
+# IDE
+.idea/
+*.iml
+
+# Claude internals
+.claude/
+
+# Design tool internals
+chat1.md
