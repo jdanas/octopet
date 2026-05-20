@@ -51,7 +51,70 @@ data class GitHubData(
     val prs: Int,
     val issues: Int,
     val grid: List<List<Int>>,
+    val recentActivity: List<ActivityItem> = emptyList(),
 )
+
+private fun fetchRecentActivity(username: String, token: String): List<ActivityItem> {
+    return try {
+        val request = Request.Builder()
+            .url("https://api.github.com/users/$username/events?per_page=30")
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("Accept", "application/vnd.github+json")
+            .build()
+        val response = client.newCall(request).execute()
+        val body = response.body?.string() ?: return emptyList()
+        if (!response.isSuccessful) return emptyList()
+
+        val events = org.json.JSONArray(body)
+        val items = mutableListOf<ActivityItem>()
+        val now = System.currentTimeMillis()
+
+        for (i in 0 until events.length()) {
+            if (items.size >= 5) break
+            val event = events.getJSONObject(i)
+            val type = event.optString("type")
+            val repo = event.optJSONObject("repo")?.optString("name")?.substringAfter("/") ?: continue
+            val createdAt = event.optString("created_at")
+            val timeAgo = relativeTime(createdAt, now)
+            val payload = event.optJSONObject("payload") ?: continue
+
+            when (type) {
+                "PushEvent" -> {
+                    val commits = payload.optJSONArray("commits")
+                    val msg = commits?.optJSONObject(0)?.optString("message")
+                        ?.lines()?.first()?.take(60) ?: "Pushed commits"
+                    items.add(ActivityItem(ActivityKind.COMMIT, repo, msg, timeAgo))
+                }
+                "PullRequestEvent" -> {
+                    val pr = payload.optJSONObject("pull_request")
+                    val title = pr?.optString("title")?.take(60) ?: "Pull request"
+                    items.add(ActivityItem(ActivityKind.PR, repo, title, timeAgo))
+                }
+                "IssuesEvent" -> {
+                    val issue = payload.optJSONObject("issue")
+                    val title = issue?.optString("title")?.take(60) ?: "Issue"
+                    items.add(ActivityItem(ActivityKind.ISSUE, repo, title, timeAgo))
+                }
+            }
+        }
+        items
+    } catch (e: Exception) {
+        emptyList()
+    }
+}
+
+private fun relativeTime(iso: String, nowMs: Long): String {
+    return try {
+        val instant = java.time.Instant.parse(iso)
+        val diffMs = nowMs - instant.toEpochMilli()
+        val minutes = diffMs / 60_000
+        when {
+            minutes < 60   -> "${minutes}m"
+            minutes < 1440 -> "${minutes / 60}h"
+            else           -> "${minutes / 1440}d"
+        }
+    } catch (e: Exception) { "?" }
+}
 
 sealed class ApiResult<out T> {
     data class Success<T>(val data: T) : ApiResult<T>()
@@ -147,10 +210,13 @@ suspend fun fetchGitHubData(username: String, token: String): ApiResult<GitHubDa
                 d.format(DateTimeFormatter.ofPattern("MMM yyyy"))
             }.getOrDefault("")
 
+            val loginName = user.getString("login")
+            val activity = fetchRecentActivity(loginName, token)
+
             ApiResult.Success(
                 GitHubData(
-                    username = user.getString("login"),
-                    displayName = user.optString("name").ifBlank { user.getString("login") },
+                    username = loginName,
+                    displayName = user.optString("name").ifBlank { loginName },
                     joinedAt = joinedAt,
                     totalContributions = calendar.getInt("totalContributions"),
                     currentStreak = currentStreak,
@@ -162,6 +228,7 @@ suspend fun fetchGitHubData(username: String, token: String): ApiResult<GitHubDa
                     prs = collection.getInt("totalPullRequestContributions"),
                     issues = collection.getInt("totalIssueContributions"),
                     grid = grid,
+                    recentActivity = activity,
                 )
             )
         } catch (e: Exception) {
