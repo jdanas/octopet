@@ -1,32 +1,37 @@
 package com.octopet.app.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.octopet.app.OAuthStep
+import com.octopet.app.UiState
 import com.octopet.app.data.PetMood
 import com.octopet.app.data.PetStage
-import com.octopet.app.data.PetFamily
 import com.octopet.app.ui.components.PaperBg
 import com.octopet.app.ui.creature.OctoPet
 import com.octopet.app.ui.theme.*
 
 @Composable
-fun OnboardingScreen(onComplete: (username: String, token: String) -> Unit) {
+fun OnboardingScreen(
+    uiState: UiState,
+    onStartOAuth: () -> Unit,
+) {
     var step by remember { mutableIntStateOf(0) }
-    var username by remember { mutableStateOf("") }
-    var token by remember { mutableStateOf("") }
+    val context = LocalContext.current
 
     val steps = listOf(
         OnboardingStep(
@@ -43,14 +48,14 @@ fun OnboardingScreen(onComplete: (username: String, token: String) -> Unit) {
         ),
         OnboardingStep(
             title = "Connect\nGitHub",
-            sub = "Enter your username and a Personal Access Token (read:user scope) to track real contributions.",
+            sub = "Authorize with GitHub to sync your real contribution data — public and private.",
             stage = null,
-            cta = "Hatch my pet",
-            showInput = true,
+            cta = "Connect with GitHub",
         ),
     )
 
     val s = steps[step]
+    val isLastStep = step == steps.size - 1
 
     PaperBg {
         Column(
@@ -63,9 +68,7 @@ fun OnboardingScreen(onComplete: (username: String, token: String) -> Unit) {
 
             // Progress dots
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 0.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 steps.forEachIndexed { i, _ ->
@@ -89,11 +92,7 @@ fun OnboardingScreen(onComplete: (username: String, token: String) -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 if (s.stage != null) {
-                    OctoPet(
-                        stage = s.stage,
-                        mood = PetMood.HAPPY,
-                        size = 200.dp,
-                    )
+                    OctoPet(stage = s.stage, mood = PetMood.HAPPY, size = 200.dp)
                 } else {
                     Box(
                         modifier = Modifier
@@ -155,14 +154,14 @@ fun OnboardingScreen(onComplete: (username: String, token: String) -> Unit) {
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                         ) {
                             Text(
-                                text = st.label,
+                                st.label,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Ink,
                                 letterSpacing = 0.5.sp,
                             )
                             Text(
-                                text = "${st.minContribs}+",
+                                "${st.minContribs}+",
                                 fontSize = 10.sp,
                                 color = InkMuted,
                                 fontFamily = JetBrainsMono,
@@ -172,97 +171,139 @@ fun OnboardingScreen(onComplete: (username: String, token: String) -> Unit) {
                 }
             }
 
-            // GitHub username + PAT input on step 3
-            if (s.showInput) {
+            // OAuth flow UI on step 3
+            if (isLastStep) {
                 Spacer(Modifier.height(24.dp))
-                // Username row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color.White)
-                        .border(1.dp, PaperLine, RoundedCornerShape(14.dp))
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "github.com/",
-                        color = InkMuted,
-                        fontFamily = JetBrainsMono,
-                        fontSize = 15.sp,
-                    )
-                    BasicTextField(
-                        value = username,
-                        onValueChange = { username = it.trim() },
-                        modifier = Modifier.weight(1f),
-                        textStyle = LocalTextStyle.current.copy(
-                            color = Ink,
-                            fontFamily = JetBrainsMono,
-                            fontSize = 15.sp,
-                        ),
-                        decorationBox = { inner ->
-                            if (username.isEmpty()) {
-                                Text("your-username", color = InkFaint, fontFamily = JetBrainsMono, fontSize = 15.sp)
+                when (uiState.oauthStep) {
+                    OAuthStep.IDLE, OAuthStep.REQUESTING -> {
+                        // Nothing extra shown — button below handles it
+                    }
+                    OAuthStep.AWAITING_AUTH -> {
+                        // Show user code card
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Text(
+                                "Enter this code at:",
+                                color = InkMuted,
+                                fontSize = 14.sp,
+                            )
+                            Text(
+                                uiState.verificationUri,
+                                color = Ink,
+                                fontFamily = JetBrainsMono,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Ink)
+                                    .padding(vertical = 20.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = uiState.userCode,
+                                    color = Paper,
+                                    fontFamily = JetBrainsMono,
+                                    fontSize = 32.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 6.sp,
+                                )
                             }
-                            inner()
-                        },
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                CircularProgressIndicator(
+                                    color = Ink,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    "Waiting for authorization…",
+                                    color = InkMuted,
+                                    fontSize = 13.sp,
+                                )
+                            }
+                        }
+                    }
+                    OAuthStep.FETCHING_DATA -> {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CircularProgressIndicator(color = Ink, strokeWidth = 2.dp)
+                            Text("Fetching your contributions…", color = InkMuted, fontSize = 14.sp)
+                        }
+                    }
+                }
+
+                // Error message
+                uiState.error?.let { err ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        err,
+                        color = Coral,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                Spacer(Modifier.height(10.dp))
-                // Token row
-                BasicTextField(
-                    value = token,
-                    onValueChange = { token = it.trim() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color.White)
-                        .border(1.dp, PaperLine, RoundedCornerShape(14.dp))
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    textStyle = LocalTextStyle.current.copy(
-                        color = Ink,
-                        fontFamily = JetBrainsMono,
-                        fontSize = 15.sp,
-                    ),
-                    decorationBox = { inner ->
-                        if (token.isEmpty()) {
-                            Text("paste token here (ghp_… or github_pat_…)", color = InkFaint, fontFamily = JetBrainsMono, fontSize = 13.sp)
-                        }
-                        inner()
-                    },
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "Settings → Developer settings → Personal access tokens → read:user scope",
-                    fontSize = 11.sp,
-                    color = InkFaint,
-                    lineHeight = 16.sp,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
             }
 
             Spacer(Modifier.weight(1f))
 
             // CTA button
-            val canProceed = !s.showInput || (username.isNotEmpty() && token.isNotEmpty())
-            Button(
-                onClick = {
-                    if (step < steps.size - 1) step++
-                    else onComplete(username, token)
-                },
-                enabled = canProceed,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(28.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Ink,
-                    contentColor = Paper,
-                    disabledContainerColor = InkFaint,
-                    disabledContentColor = Paper,
-                ),
-            ) {
-                Text(s.cta, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            val isOAuthInProgress = isLastStep && uiState.oauthStep == OAuthStep.AWAITING_AUTH
+            val isLoading = isLastStep && (uiState.oauthStep == OAuthStep.REQUESTING || uiState.oauthStep == OAuthStep.FETCHING_DATA)
+
+            if (isOAuthInProgress) {
+                // "Open in browser" shortcut button
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(uiState.verificationUri))
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(Ink),
+                    ),
+                ) {
+                    Text("Open github.com/login/device ↗", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                }
+            } else {
+                Button(
+                    onClick = {
+                        if (!isLastStep) step++
+                        else onStartOAuth()
+                    },
+                    enabled = !isLoading,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Ink,
+                        contentColor = Paper,
+                        disabledContainerColor = InkFaint,
+                        disabledContentColor = Paper,
+                    ),
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(color = Paper, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    } else {
+                        Text(s.cta, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
             }
 
             if (step == 0) {
@@ -286,5 +327,4 @@ private data class OnboardingStep(
     val sub: String,
     val stage: PetStage?,
     val cta: String,
-    val showInput: Boolean = false,
 )

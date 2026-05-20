@@ -37,7 +37,7 @@ fun OctopetApp(vm: MainViewModel = viewModel()) {
     val state by vm.state.collectAsState()
 
     when {
-        !state.onboarded -> OnboardingScreen(onComplete = { username, token -> vm.onboard(username, token) })
+        !state.onboarded -> OnboardingScreen(uiState = state, onStartOAuth = vm::startOAuth)
         state.isLoading  -> LoadingScreen()
         state.error != null -> ErrorScreen(message = state.error!!, onRetry = vm::retry)
         else -> MainContent(state = state, onSignOut = vm::signOut)
