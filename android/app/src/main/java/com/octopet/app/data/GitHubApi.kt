@@ -14,12 +14,12 @@ private val client = OkHttpClient()
 private val JSON = "application/json".toMediaType()
 
 private val QUERY = """
-    query(${"$"}login: String!) {
+    query(${"$"}login: String!, ${"$"}from: DateTime!, ${"$"}to: DateTime!) {
       user(login: ${"$"}login) {
         name
         login
         createdAt
-        contributionsCollection {
+        contributionsCollection(from: ${"$"}from, to: ${"$"}to) {
           totalCommitContributions
           totalPullRequestContributions
           totalIssueContributions
@@ -124,7 +124,14 @@ sealed class ApiResult<out T> {
 suspend fun fetchGitHubData(username: String, token: String): ApiResult<GitHubData> =
     withContext(Dispatchers.IO) {
         try {
-            val variables = JSONObject().put("login", username)
+            // Use rolling 12-month window (same as GitHub profile page)
+            val toDate   = LocalDate.now()
+            val fromDate = toDate.minusDays(364)
+            val iso      = DateTimeFormatter.ISO_LOCAL_DATE
+            val variables = JSONObject()
+                .put("login", username)
+                .put("from", "${fromDate.format(iso)}T00:00:00Z")
+                .put("to",   "${toDate.format(iso)}T23:59:59Z")
             val body = JSONObject()
                 .put("query", QUERY)
                 .put("variables", variables)
