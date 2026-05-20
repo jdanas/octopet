@@ -9,14 +9,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+enum class OAuthStep { IDLE, REQUESTING, AWAITING_AUTH, FETCHING_DATA }
+
 data class UiState(
-    val onboarded: Boolean = false,
-    val isLoading: Boolean = false,
-    val error: String? = null,
-    val appState: AppState = AppState(),
-    val user: User? = null,
-    val grid: List<List<Int>> = MockData.generateContributionGrid(),
+    val onboarded: Boolean        = false,
+    val isLoading: Boolean        = false,
+    val error: String?            = null,
+    val appState: AppState        = AppState(),
+    val user: User?               = null,
+    val grid: List<List<Int>>     = MockData.generateContributionGrid(),
     val activity: List<ActivityItem> = emptyList(),
+    // OAuth device flow
+    val oauthStep: OAuthStep      = OAuthStep.IDLE,
+    val userCode: String          = "",
+    val verificationUri: String   = "https://github.com/login/device",
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -27,29 +33,66 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<UiState> = _state
 
     init {
+        // Auto-login if token already saved
         viewModelScope.launch {
-            val (username, token) = repo.credentials.first()
-            if (username.isNotEmpty() && token.isNotEmpty()) {
+            val (_, token) = repo.credentials.first()
+            if (token.isNotEmpty()) {
                 _state.value = _state.value.copy(onboarded = true, isLoading = true)
-                refresh(username, token)
+                refresh(token)
             }
         }
     }
 
-    fun onboard(username: String, token: String) {
+    // ── OAuth Device Flow ────────────────────────────────────────────────────
+
+    fun startOAuth() {
         viewModelScope.launch {
-            repo.saveCredentials(username, token)
-            _state.value = _state.value.copy(onboarded = true, isLoading = true)
-            refresh(username, token)
+            _state.value = _state.value.copy(oauthStep = OAuthStep.REQUESTING, error = null)
+            when (val result = requestDeviceCode()) {
+                is ApiResult.Error   -> _state.value = _state.value.copy(
+                    oauthStep = OAuthStep.IDLE,
+                    error = result.message,
+                )
+                is ApiResult.Success -> {
+                    val code = result.data
+                    _state.value = _state.value.copy(
+                        oauthStep       = OAuthStep.AWAITING_AUTH,
+                        userCode        = code.userCode,
+                        verificationUri = code.verificationUri,
+                    )
+                    pollForToken(code.deviceCode, code.interval).collect { poll ->
+                        when (poll) {
+                            is AuthPollResult.Pending -> { /* keep waiting */ }
+                            is AuthPollResult.Success -> {
+                                _state.value = _state.value.copy(
+                                    oauthStep = OAuthStep.FETCHING_DATA,
+                                    onboarded = true,
+                                    isLoading = true,
+                                )
+                                repo.saveCredentials("", poll.token)
+                                refresh(poll.token)
+                            }
+                            is AuthPollResult.Expired -> _state.value = _state.value.copy(
+                                oauthStep = OAuthStep.IDLE,
+                                error = "Code expired — please try again.",
+                            )
+                            is AuthPollResult.Error   -> _state.value = _state.value.copy(
+                                oauthStep = OAuthStep.IDLE,
+                                error = poll.message,
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
     fun retry() {
         viewModelScope.launch {
-            val (username, token) = repo.credentials.first()
-            if (username.isNotEmpty() && token.isNotEmpty()) {
+            val (_, token) = repo.credentials.first()
+            if (token.isNotEmpty()) {
                 _state.value = _state.value.copy(isLoading = true, error = null)
-                refresh(username, token)
+                refresh(token)
             }
         }
     }
@@ -61,10 +104,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun refresh(username: String, token: String) {
-        when (val result = fetchGitHubData(username, token)) {
+    // ── Private helpers ──────────────────────────────────────────────────────
+
+    private suspend fun refresh(token: String) {
+        when (val result = fetchGitHubData(token)) {
+            is ApiResult.Error   -> _state.value = _state.value.copy(
+                isLoading = false,
+                error     = result.message,
+                oauthStep = OAuthStep.IDLE,
+            )
             is ApiResult.Success -> {
-                val data = result.data
+                val data  = result.data
                 val stats = Stats(
                     totalContributions = data.totalContributions,
                     currentStreak      = data.currentStreak,
@@ -75,34 +125,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     prs                = data.prs,
                     issues             = data.issues,
                 )
-                val stage = stageForContribs(data.totalContributions)
-                val mood  = moodForData(data)
+                // Persist the resolved username alongside the token
+                repo.saveCredentials(data.username, token)
+
                 _state.value = _state.value.copy(
                     isLoading = false,
-                    error = null,
-                    user = User(data.username, data.displayName, data.joinedAt),
-                    grid = data.grid,
-                    activity = data.recentActivity,
-                    appState = AppState(
-                        family = PetFamily.OCTO,
-                        stage  = stage,
-                        mood   = mood,
-                        stats  = stats,
+                    error     = null,
+                    oauthStep = OAuthStep.IDLE,
+                    user      = User(data.username, data.displayName, data.joinedAt),
+                    grid      = data.grid,
+                    activity  = data.recentActivity,
+                    appState  = AppState(
+                        family    = PetFamily.OCTO,
+                        stage     = stageForContribs(data.totalContributions),
+                        mood      = moodForData(data),
+                        stats     = stats,
                         onboarded = true,
                     ),
                 )
-            }
-            is ApiResult.Error -> {
-                _state.value = _state.value.copy(isLoading = false, error = result.message)
             }
         }
     }
 }
 
 private fun moodForData(data: GitHubData): PetMood = when {
-    data.todayCount >= 6                                      -> PetMood.EXCITED
-    data.todayCount > 0                                       -> PetMood.HAPPY
-    data.currentStreak > 0                                    -> PetMood.NEUTRAL
-    data.thisWeekCount == 0 && data.currentStreak == 0        -> PetMood.SLEEPING
-    else                                                      -> PetMood.HUNGRY
+    data.todayCount >= 6                               -> PetMood.EXCITED
+    data.todayCount > 0                                -> PetMood.HAPPY
+    data.currentStreak > 0                             -> PetMood.NEUTRAL
+    data.thisWeekCount == 0 && data.currentStreak == 0 -> PetMood.SLEEPING
+    else                                               -> PetMood.HUNGRY
 }
