@@ -6,6 +6,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.Request
 import org.json.JSONObject
@@ -28,8 +29,8 @@ sealed class AuthPollResult {
     object Expired : AuthPollResult()
 }
 
-suspend fun requestDeviceCode(): ApiResult<DeviceCodeResponse> {
-    return try {
+suspend fun requestDeviceCode(): ApiResult<DeviceCodeResponse> = withContext(Dispatchers.IO) {
+    try {
         val body = FormBody.Builder()
             .add("client_id", GITHUB_CLIENT_ID)
             .add("scope", DEVICE_SCOPE)
@@ -41,7 +42,7 @@ suspend fun requestDeviceCode(): ApiResult<DeviceCodeResponse> {
             .build()
         val response = client.newCall(request).execute()
         val json = JSONObject(response.body?.string() ?: "{}")
-        if (!response.isSuccessful) return ApiResult.Error("HTTP ${response.code}")
+        if (!response.isSuccessful) return@withContext ApiResult.Error("HTTP ${response.code}")
 
         Log.d(TAG, "Device code requested: userCode=${json.optString("user_code")}")
 
