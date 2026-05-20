@@ -16,6 +16,7 @@ data class UiState(
     val appState: AppState = AppState(),
     val user: User? = null,
     val grid: List<List<Int>> = MockData.generateContributionGrid(),
+    val activity: List<ActivityItem> = emptyList(),
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -81,6 +82,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     error = null,
                     user = User(data.username, data.displayName, data.joinedAt),
                     grid = data.grid,
+                    activity = data.recentActivity,
                     appState = AppState(
                         family = PetFamily.OCTO,
                         stage  = stage,
