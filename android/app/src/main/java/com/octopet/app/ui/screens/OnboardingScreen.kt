@@ -23,9 +23,10 @@ import com.octopet.app.ui.creature.OctoPet
 import com.octopet.app.ui.theme.*
 
 @Composable
-fun OnboardingScreen(onComplete: () -> Unit) {
+fun OnboardingScreen(onComplete: (username: String, token: String) -> Unit) {
     var step by remember { mutableIntStateOf(0) }
     var username by remember { mutableStateOf("") }
+    var token by remember { mutableStateOf("") }
 
     val steps = listOf(
         OnboardingStep(
@@ -42,7 +43,7 @@ fun OnboardingScreen(onComplete: () -> Unit) {
         ),
         OnboardingStep(
             title = "Connect\nGitHub",
-            sub = "We'll read your public contribution graph. Nothing else.",
+            sub = "Enter your username and a Personal Access Token (read:user scope) to track real contributions.",
             stage = null,
             cta = "Hatch my pet",
             showInput = true,
@@ -171,9 +172,10 @@ fun OnboardingScreen(onComplete: () -> Unit) {
                 }
             }
 
-            // GitHub username input on step 3
+            // GitHub username + PAT input on step 3
             if (s.showInput) {
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(24.dp))
+                // Username row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -191,7 +193,7 @@ fun OnboardingScreen(onComplete: () -> Unit) {
                     )
                     BasicTextField(
                         value = username,
-                        onValueChange = { username = it },
+                        onValueChange = { username = it.trim() },
                         modifier = Modifier.weight(1f),
                         textStyle = LocalTextStyle.current.copy(
                             color = Ink,
@@ -206,15 +208,47 @@ fun OnboardingScreen(onComplete: () -> Unit) {
                         },
                     )
                 }
+                Spacer(Modifier.height(10.dp))
+                // Token row
+                BasicTextField(
+                    value = token,
+                    onValueChange = { token = it.trim() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White)
+                        .border(1.dp, PaperLine, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    textStyle = LocalTextStyle.current.copy(
+                        color = Ink,
+                        fontFamily = JetBrainsMono,
+                        fontSize = 15.sp,
+                    ),
+                    decorationBox = { inner ->
+                        if (token.isEmpty()) {
+                            Text("paste token here (ghp_… or github_pat_…)", color = InkFaint, fontFamily = JetBrainsMono, fontSize = 13.sp)
+                        }
+                        inner()
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Settings → Developer settings → Personal access tokens → read:user scope",
+                    fontSize = 11.sp,
+                    color = InkFaint,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
             }
 
             Spacer(Modifier.weight(1f))
 
             // CTA button
-            val canProceed = !s.showInput || username.isNotEmpty()
+            val canProceed = !s.showInput || (username.isNotEmpty() && token.isNotEmpty())
             Button(
                 onClick = {
-                    if (step < steps.size - 1) step++ else onComplete()
+                    if (step < steps.size - 1) step++
+                    else onComplete(username, token)
                 },
                 enabled = canProceed,
                 modifier = Modifier

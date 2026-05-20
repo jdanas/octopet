@@ -27,6 +27,7 @@ fun ProfileScreen(
     state: AppState,
     grid: List<List<Int>>,
     user: User = MockData.user,
+    onSignOut: () -> Unit = {},
 ) {
     val stageIdx = PetStage.entries.indexOf(state.stage)
     val earnedCount = MockData.badges.count { it.earned }
@@ -47,17 +48,14 @@ fun ProfileScreen(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                listOf("↗", "⚙") .forEach { icon ->
-                    Spacer(Modifier.width(8.dp))
-                    IconButton(
-                        onClick = {},
-                        modifier = Modifier
-                            .size(40.dp)
-                            .border(1.dp, PaperLine, CircleShape)
-                            .background(Color.White, CircleShape),
-                    ) {
-                        Text(icon, fontSize = 16.sp, color = Ink)
-                    }
+                IconButton(
+                    onClick = onSignOut,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .border(1.dp, PaperLine, CircleShape)
+                        .background(Color.White, CircleShape),
+                ) {
+                    Text("⏏", fontSize = 16.sp, color = Ink)
                 }
             }
 

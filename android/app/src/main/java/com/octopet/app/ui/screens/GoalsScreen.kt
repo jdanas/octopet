@@ -20,8 +20,13 @@ import com.octopet.app.ui.theme.*
 @Composable
 fun GoalsScreen(
     stats: Stats = MockData.stats,
-    goals: List<Goal> = MockData.goals,
 ) {
+    val goals = listOf(
+        Goal("weekly_commits", "Weekly commits",  target = 40,  current = stats.thisWeek,     unit = "commits", period = "this week"),
+        Goal("streak_goal",    "Streak goal",     target = 30,  current = stats.currentStreak,unit = "days",    period = "current"),
+        Goal("monthly_prs",    "Pull requests",   target = 8,   current = stats.prs.coerceAtMost(8),  unit = "PRs",     period = "this month"),
+        Goal("monthly_issues", "Issues opened",   target = 10,  current = stats.issues.coerceAtMost(10), unit = "issues", period = "this month"),
+    )
     PaperBg {
         Column(
             modifier = Modifier
@@ -86,16 +91,25 @@ fun GoalsScreen(
                     Column {
                         Text("This week", color = InkSoft, fontWeight = FontWeight.Medium, fontSize = 13.sp)
                         Spacer(Modifier.height(2.dp))
+                        val weeklyTarget = 40
+                        val weeklyHeadline = when {
+                            stats.thisWeek >= weeklyTarget -> "Goal crushed!"
+                            stats.thisWeek >= weeklyTarget * 0.8 -> "Nearly there"
+                            stats.thisWeek == 0 -> "Let's go!"
+                            else -> "Keep going"
+                        }
                         Text(
-                            "Nearly there",
+                            weeklyHeadline,
                             color = Ink,
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = (-0.4).sp,
                         )
                         Spacer(Modifier.height(4.dp))
+                        val remaining = (weeklyTarget - stats.thisWeek).coerceAtLeast(0)
                         Text(
-                            "2 more commits to hit your goal.",
+                            if (remaining == 0) "You hit your weekly target!"
+                            else "$remaining more commits to hit your goal.",
                             color = InkMuted,
                             fontSize = 13.sp,
                         )
@@ -121,7 +135,7 @@ fun GoalsScreen(
                         .fillMaxWidth()
                         .height(56.dp),
                     shape = RoundedCornerShape(20.dp),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                    border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(
                         brush = androidx.compose.ui.graphics.SolidColor(PaperLine),
                     ),
                 ) {
