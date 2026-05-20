@@ -87,7 +87,12 @@ private fun MainContent(state: UiState, onSignOut: () -> Unit) {
     ) { innerPadding ->
         Box(modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding())) {
             when (activeTab) {
-                Tab.HOME    -> HomeScreen(state = state.appState, grid = state.grid)
+                Tab.HOME    -> HomeScreen(
+                    state = state.appState,
+                    grid = state.grid,
+                    user = state.user ?: com.octopet.app.data.MockData.user,
+                    activity = state.activity.ifEmpty { com.octopet.app.data.MockData.activity },
+                )
                 Tab.GOALS   -> GoalsScreen(stats = state.appState.stats)
                 Tab.BADGES  -> BadgesScreen()
                 Tab.PROFILE -> ProfileScreen(
