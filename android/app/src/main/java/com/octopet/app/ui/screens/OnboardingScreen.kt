@@ -41,9 +41,9 @@ fun OnboardingScreen(
             cta = "Continue",
         ),
         OnboardingStep(
-            title = "Commit.\nGrow.\nRepeat.",
-            sub = "Your pet evolves through 5 stages as you hit contribution milestones.",
-            stage = PetStage.SPROUT,
+            title = "A mystery\nawaits.",
+            sub = "Your egg is a mystery — you won't know what hatches until you commit enough to crack it open. Every developer's pet is unique.",
+            stage = PetStage.EGG,
             cta = "I'm in",
         ),
         OnboardingStep(

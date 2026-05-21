@@ -32,9 +32,12 @@ fun HomeScreen(
 ) {
     val stageIdx = PetStage.entries.indexOf(state.stage)
     val nextStage = PetStage.entries.getOrNull(stageIdx + 1)
+    // Progress toward the next stage is measured against post-signup contributions —
+    // historical commits don't pre-hatch the egg.
     val progress = if (nextStage != null) {
-        (state.stats.totalContributions - state.stage.minContribs).toFloat() /
-                (nextStage.minContribs - state.stage.minContribs)
+        ((state.petContributions - state.stage.minContribs).toFloat() /
+                (nextStage.minContribs - state.stage.minContribs))
+            .coerceIn(0f, 1f)
     } else 1f
 
     val speechMessage = mapOf(
@@ -113,6 +116,7 @@ fun HomeScreen(
                             stage = state.stage,
                             mood = state.mood,
                             size = 180.dp,
+                            variantSeed = state.variantSeed,
                         )
                     }
 
@@ -143,7 +147,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Text(
-                                text = "${state.stats.totalContributions} / ${nextStage.minContribs}",
+                                text = "${state.petContributions} / ${nextStage.minContribs}",
                                 color = InkMuted,
                                 fontFamily = JetBrainsMono,
                                 fontSize = 12.sp,

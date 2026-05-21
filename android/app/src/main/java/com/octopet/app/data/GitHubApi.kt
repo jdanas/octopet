@@ -56,6 +56,8 @@ data class GitHubData(
     val issues: Int,
     val grid: List<List<Int>>,
     val recentActivity: List<ActivityItem> = emptyList(),
+    // Sum of contributions made on/after the user's Octopet sign-up date.
+    val petContributions: Int = 0,
 )
 
 sealed class ApiResult<out T> {
@@ -63,7 +65,7 @@ sealed class ApiResult<out T> {
     data class Error(val message: String) : ApiResult<Nothing>()
 }
 
-suspend fun fetchGitHubData(token: String): ApiResult<GitHubData> =
+suspend fun fetchGitHubData(token: String, signupDate: LocalDate): ApiResult<GitHubData> =
     withContext(Dispatchers.IO) {
         try {
             // Rolling 12-month window — matches GitHub profile page
@@ -136,6 +138,12 @@ suspend fun fetchGitHubData(token: String): ApiResult<GitHubData> =
             val thisWeekCount = (0..6).sumOf { dayMap[today.minusDays(it.toLong()).format(fmt)] ?: 0 }
             val thisMonthCount = (0..29).sumOf { dayMap[today.minusDays(it.toLong()).format(fmt)] ?: 0 }
 
+            // Contributions made on/after the Octopet sign-up date — historical commits don't count.
+            val petContributions = dayMap.entries.sumOf { (dateStr, count) ->
+                val date = runCatching { LocalDate.parse(dateStr, fmt) }.getOrNull()
+                if (date != null && !date.isBefore(signupDate)) count else 0
+            }
+
             val grid = mutableListOf<List<Int>>()
             for (w in 0 until weeksArray.length()) {
                 val days = weeksArray.getJSONObject(w).getJSONArray("contributionDays")
@@ -149,7 +157,7 @@ suspend fun fetchGitHubData(token: String): ApiResult<GitHubData> =
 
             val loginName = user.getString("login")
 
-            Log.d(TAG, "viewer=$loginName total=${calendar.getInt("totalContributions")} restricted=${collection.getInt("restrictedContributionsCount")} weeks=${weeksArray.length()}")
+            Log.d(TAG, "viewer=$loginName total=${calendar.getInt("totalContributions")} pet=$petContributions signup=$signupDate restricted=${collection.getInt("restrictedContributionsCount")} weeks=${weeksArray.length()}")
 
             val activity = fetchRecentActivity(loginName, token)
 
@@ -169,6 +177,7 @@ suspend fun fetchGitHubData(token: String): ApiResult<GitHubData> =
                     issues             = collection.getInt("totalIssueContributions"),
                     grid               = grid,
                     recentActivity     = activity,
+                    petContributions   = petContributions,
                 )
             )
         } catch (e: Exception) {
