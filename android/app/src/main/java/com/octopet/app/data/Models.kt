@@ -1,8 +1,16 @@
 package com.octopet.app.data
 
+import java.time.LocalDate
+
 // ── Pet system ───────────────────────────────────────────────
 
 enum class PetFamily { OCTO, ROBO, SLIME }
+
+// Per-user mystery-box state. Created once at first OAuth sign-in and cleared on sign-out.
+data class PetProfile(
+    val signupDate: LocalDate,
+    val variantSeed: Long,
+)
 
 enum class PetStage(val label: String, val minContribs: Int) {
     EGG("egg", 0),
@@ -87,8 +95,12 @@ data class ActivityItem(
 
 data class AppState(
     val family: PetFamily = PetFamily.OCTO,
-    val stage: PetStage = PetStage.FLEDGLING,
+    val stage: PetStage = PetStage.EGG,
     val mood: PetMood = PetMood.HAPPY,
     val stats: Stats = MockData.stats,
     val onboarded: Boolean = false,
+    // Contributions made on/after the user's Octopet sign-up date — drives stage progression.
+    val petContributions: Int = 0,
+    // Seed for per-user color/accent variation. 0 = default palette.
+    val variantSeed: Long = 0L,
 )

@@ -70,6 +70,7 @@ fun ProfileScreen(
                     stage = state.stage,
                     mood = PetMood.HAPPY,
                     size = 120.dp,
+                    variantSeed = state.variantSeed,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(

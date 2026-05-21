@@ -1,6 +1,7 @@
 package com.octopet.app
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.octopet.app.data.*
@@ -8,6 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import kotlin.random.Random
 
 enum class OAuthStep { IDLE, REQUESTING, AWAITING_AUTH, FETCHING_DATA }
 
@@ -37,8 +40,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val (_, token) = repo.credentials.first()
             if (token.isNotEmpty()) {
+                val profile = ensurePetProfile()
                 _state.value = _state.value.copy(onboarded = true, isLoading = true)
-                refresh(token)
+                refresh(token, profile)
             }
         }
     }
@@ -70,7 +74,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                                     isLoading = true,
                                 )
                                 repo.saveCredentials("", poll.token)
-                                refresh(poll.token)
+                                val profile = ensurePetProfile()
+                                refresh(poll.token, profile)
                             }
                             is AuthPollResult.Expired -> _state.value = _state.value.copy(
                                 oauthStep = OAuthStep.IDLE,
@@ -91,8 +96,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val (_, token) = repo.credentials.first()
             if (token.isNotEmpty()) {
+                val profile = ensurePetProfile()
                 _state.value = _state.value.copy(isLoading = true, error = null)
-                refresh(token)
+                refresh(token, profile)
             }
         }
     }
@@ -106,8 +112,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private suspend fun refresh(token: String) {
-        when (val result = fetchGitHubData(token)) {
+    // Load the persisted PetProfile, or create+persist a fresh one (mystery-box roll).
+    private suspend fun ensurePetProfile(): PetProfile {
+        repo.petProfile.first()?.let { return it }
+        val fresh = PetProfile(
+            signupDate  = LocalDate.now(),
+            variantSeed = Random.nextLong(),
+        )
+        repo.savePetProfile(fresh)
+        Log.d("OctoPet", "rolled mystery box: seed=${fresh.variantSeed} signup=${fresh.signupDate}")
+        return fresh
+    }
+
+    private suspend fun refresh(token: String, profile: PetProfile) {
+        when (val result = fetchGitHubData(token, profile.signupDate)) {
             is ApiResult.Error   -> _state.value = _state.value.copy(
                 isLoading = false,
                 error     = result.message,
@@ -136,11 +154,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     grid      = data.grid,
                     activity  = data.recentActivity,
                     appState  = AppState(
-                        family    = PetFamily.OCTO,
-                        stage     = stageForContribs(data.totalContributions),
-                        mood      = moodForData(data),
-                        stats     = stats,
-                        onboarded = true,
+                        family           = PetFamily.OCTO,
+                        stage            = stageForContribs(data.petContributions),
+                        mood             = moodForData(data),
+                        stats            = stats,
+                        onboarded        = true,
+                        petContributions = data.petContributions,
+                        variantSeed      = profile.variantSeed,
                     ),
                 )
             }
