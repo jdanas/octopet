@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.octopet.app.data.PetMood
 import com.octopet.app.data.PetStage
 import com.octopet.app.ui.theme.*
+import kotlin.math.sin
 
 // All drawing uses a 200×200 virtual coordinate space (matching the SVG viewBox),
 // scaled by `s = canvasSize / 200` at draw time.
@@ -67,28 +68,86 @@ fun OctoPet(
     variantSeed: Long = 0L,
 ) {
     val variant = remember(variantSeed) { variantFor(variantSeed) }
-    val infiniteTransition = rememberInfiniteTransition(label = "wobble")
-    val offsetY by infiniteTransition.animateFloat(
+    val infiniteTransition = rememberInfiniteTransition(label = "octopet")
+
+    // Mood tweaks the cadence so the pet visibly reflects how it feels.
+    val wobbleDuration = when (mood) {
+        PetMood.EXCITED -> 700
+        PetMood.SLEEPING -> 2600
+        else -> 1500
+    }
+    val breatheDuration = if (mood == PetMood.SLEEPING) 3400 else 2400
+    val wiggleDuration = when (mood) {
+        PetMood.EXCITED -> 1300
+        PetMood.SLEEPING -> 3200
+        else -> 2200
+    }
+
+    val wobbleY by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = if (animated) 1f else 0f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = FastOutSlowInEasing),
+            animation = tween(wobbleDuration, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse,
         ),
         label = "wobbleY",
     )
 
+    val breathe by infiniteTransition.animateFloat(
+        initialValue = 0.985f,
+        targetValue = 1.025f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(breatheDuration, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "breathe",
+    )
+
+    val wigglePhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2f * Math.PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(wiggleDuration, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "wigglePhase",
+    )
+
+    // Blink: closed for a small window inside a ~4.2s loop.
+    val blink by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 4200
+                0f at 0
+                0f at 3900
+                1f at 4020
+                0f at 4180
+            },
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "blink",
+    )
+
     Canvas(modifier = Modifier.size(size)) {
         val s = this.size.width / 200f
-        val yOff = if (animated) offsetY * 3f * s else 0f
+        val yOff = if (animated) wobbleY * 3f * s else 0f
+        val breatheScale = if (animated) breathe else 1f
+        val phase = if (animated) wigglePhase else 0f
+        val blinkAmt = if (animated) blink else 0f
 
-        withTransform({ translate(left = 0f, top = yOff) }) {
+        withTransform({
+            translate(left = 0f, top = yOff)
+            // Anchor breathing at the base so the head expands upward.
+            scale(scaleX = 1f, scaleY = breatheScale, pivot = Offset(100f * s, 170f * s))
+        }) {
             when (stage) {
                 PetStage.EGG       -> drawEgg(s, mood)
-                PetStage.SPROUT    -> drawSprout(s, mood, variant)
-                PetStage.HATCHLING -> drawHatchling(s, mood, variant)
-                PetStage.FLEDGLING -> drawFledgling(s, mood, variant)
-                PetStage.ELDER     -> drawElder(s, mood, variant)
+                PetStage.SPROUT    -> drawSprout(s, mood, variant, phase, blinkAmt)
+                PetStage.HATCHLING -> drawHatchling(s, mood, variant, phase, blinkAmt)
+                PetStage.FLEDGLING -> drawFledgling(s, mood, variant, phase, blinkAmt)
+                PetStage.ELDER     -> drawElder(s, mood, variant, phase, blinkAmt)
             }
         }
     }
@@ -96,7 +155,25 @@ fun OctoPet(
 
 // ── Eye helpers ──────────────────────────────────────────────
 
-private fun DrawScope.drawEye(cx: Float, cy: Float, r: Float, mood: PetMood, s: Float) {
+private fun DrawScope.drawEye(
+    cx: Float,
+    cy: Float,
+    r: Float,
+    mood: PetMood,
+    s: Float,
+    blink: Float = 0f,
+) {
+    // Blink overlays a closed-eye line for moods whose default eye is round.
+    // HAPPY and SLEEPING already use curved/closed eyes, so we leave them alone.
+    val blinkable = mood == PetMood.NEUTRAL || mood == PetMood.HUNGRY || mood == PetMood.EXCITED
+    if (blinkable && blink > 0.55f) {
+        val path = Path().apply {
+            moveTo((cx - r) * s, cy * s)
+            quadraticTo(cx * s, (cy + r * 0.3f) * s, (cx + r) * s, cy * s)
+        }
+        drawPath(path, Ink, style = Stroke(width = 2.2f * s, cap = StrokeCap.Round))
+        return
+    }
     when (mood) {
         PetMood.HAPPY -> {
             val path = Path().apply {
@@ -147,22 +224,36 @@ private fun DrawScope.drawEgg(s: Float, mood: PetMood) {
     drawCircle(EggShellDark.copy(alpha = 0.4f), radius = 2.5f * s, center = Offset(105 * s, 85 * s))
 }
 
-private fun DrawScope.drawSprout(s: Float, mood: PetMood, v: OctoVariant) {
+private fun DrawScope.drawSprout(s: Float, mood: PetMood, v: OctoVariant, phase: Float, blink: Float) {
     drawOval(Color(0xFF6B5437).copy(alpha = 0.4f), topLeft = Offset(50 * s, 153 * s), size = Size(100 * s, 24 * s))
-    drawRoundRect(v.bodyDark, topLeft = Offset(96 * s, 120 * s), size = Size(8 * s, 50 * s), cornerRadius = androidx.compose.ui.geometry.CornerRadius(4 * s))
-    drawOval(v.body, topLeft = Offset(72 * s, 89 * s), size = Size(56 * s, 52 * s))
-    drawOval(v.belly, topLeft = Offset(80 * s, 105 * s), size = Size(40 * s, 30 * s))
-    drawOval(v.body, topLeft = Offset(54 * s, 101 * s), size = Size(36 * s, 18 * s))
-    drawOval(v.body, topLeft = Offset(110 * s, 101 * s), size = Size(36 * s, 18 * s))
-    drawEye(91f, 110f, 3f, mood, s)
-    drawEye(109f, 110f, 3f, mood, s)
+    // Stem leans gently with the wiggle.
+    val stemSway = sin(phase) * 1.2f
+    drawRoundRect(
+        v.bodyDark,
+        topLeft = Offset((96 + stemSway) * s, 120 * s),
+        size = Size(8 * s, 50 * s),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(4 * s),
+    )
+    val headDx = sin(phase) * 1.8f
+    drawOval(v.body, topLeft = Offset((72 + headDx) * s, 89 * s), size = Size(56 * s, 52 * s))
+    drawOval(v.belly, topLeft = Offset((80 + headDx) * s, 105 * s), size = Size(40 * s, 30 * s))
+    // Side leaves flutter slightly out of phase.
+    val leafL = sin(phase + 0.6f) * 1.5f
+    val leafR = sin(phase + 0.6f + Math.PI.toFloat()) * 1.5f
+    drawOval(v.body, topLeft = Offset(54 * s, (101 + leafL) * s), size = Size(36 * s, 18 * s))
+    drawOval(v.body, topLeft = Offset(110 * s, (101 + leafR) * s), size = Size(36 * s, 18 * s))
+    drawEye(91f + headDx, 110f, 3f, mood, s, blink)
+    drawEye(109f + headDx, 110f, 3f, mood, s, blink)
     if (mood == PetMood.HAPPY) {
-        val mouth = Path().apply { moveTo(95 * s, 118 * s); quadraticTo(100 * s, 122 * s, 105 * s, 118 * s) }
+        val mouth = Path().apply {
+            moveTo((95 + headDx) * s, 118 * s)
+            quadraticTo((100 + headDx) * s, 122 * s, (105 + headDx) * s, 118 * s)
+        }
         drawPath(mouth, Ink, style = Stroke(width = 1.5f * s, cap = StrokeCap.Round))
     }
 }
 
-private fun DrawScope.drawHatchling(s: Float, mood: PetMood, v: OctoVariant) {
+private fun DrawScope.drawHatchling(s: Float, mood: PetMood, v: OctoVariant, phase: Float, blink: Float) {
     drawOval(Color.Black.copy(alpha = 0.1f), topLeft = Offset(60 * s, 164 * s), size = Size(80 * s, 12 * s))
     val body = Path().apply {
         moveTo(50 * s, 110 * s)
@@ -174,11 +265,13 @@ private fun DrawScope.drawHatchling(s: Float, mood: PetMood, v: OctoVariant) {
     }
     drawPath(body, v.body)
     drawOval(v.belly, topLeft = Offset(68 * s, 97 * s), size = Size(64 * s, 56 * s))
-    listOf(65f, 85f, 115f, 135f).forEach { x ->
-        drawOval(v.body, topLeft = Offset((x - 10) * s, 141 * s), size = Size(20 * s, 28 * s))
+    listOf(65f, 85f, 115f, 135f).forEachIndexed { i, x ->
+        val dy = sin(phase + i * 0.9f) * 2.5f
+        val dx = sin(phase * 0.5f + i * 0.4f) * 1.2f
+        drawOval(v.body, topLeft = Offset((x - 10 + dx) * s, (141 + dy) * s), size = Size(20 * s, 28 * s))
     }
-    drawEye(85f, 100f, 5f, mood, s)
-    drawEye(115f, 100f, 5f, mood, s)
+    drawEye(85f, 100f, 5f, mood, s, blink)
+    drawEye(115f, 100f, 5f, mood, s, blink)
     if (mood == PetMood.HAPPY) {
         drawCircle(v.cheek.copy(alpha = 0.6f), radius = 5 * s, center = Offset(75 * s, 115 * s))
         drawCircle(v.cheek.copy(alpha = 0.6f), radius = 5 * s, center = Offset(125 * s, 115 * s))
@@ -195,12 +288,14 @@ private fun DrawScope.drawHatchling(s: Float, mood: PetMood, v: OctoVariant) {
     if (mood == PetMood.SLEEPING) {
         val mouth = Path().apply { moveTo(92 * s, 120 * s); quadraticTo(100 * s, 124 * s, 108 * s, 120 * s) }
         drawPath(mouth, Ink, style = Stroke(width = 2f * s, cap = StrokeCap.Round))
-        drawCircle(Ink.copy(alpha = 0.4f), radius = 2.5f * s, center = Offset(150 * s, 75 * s))
-        drawCircle(Ink.copy(alpha = 0.4f), radius = 3.5f * s, center = Offset(158 * s, 65 * s))
+        // Drifting zzz's: bob with the wiggle phase.
+        val zDrift = sin(phase) * 2f
+        drawCircle(Ink.copy(alpha = 0.4f), radius = 2.5f * s, center = Offset(150 * s, (75 + zDrift) * s))
+        drawCircle(Ink.copy(alpha = 0.4f), radius = 3.5f * s, center = Offset(158 * s, (65 - zDrift) * s))
     }
 }
 
-private fun DrawScope.drawFledgling(s: Float, mood: PetMood, v: OctoVariant) {
+private fun DrawScope.drawFledgling(s: Float, mood: PetMood, v: OctoVariant, phase: Float, blink: Float) {
     drawOval(Color.Black.copy(alpha = 0.1f), topLeft = Offset(55 * s, 169 * s), size = Size(90 * s, 12 * s))
     val body = Path().apply {
         moveTo(40 * s, 105 * s)
@@ -212,9 +307,11 @@ private fun DrawScope.drawFledgling(s: Float, mood: PetMood, v: OctoVariant) {
     }
     drawPath(body, v.body)
     drawOval(v.belly, topLeft = Offset(62 * s, 93 * s), size = Size(76 * s, 64 * s))
-    listOf(55f, 78f, 100f, 122f, 145f).forEach { x ->
-        drawOval(v.body, topLeft = Offset((x - 10) * s, 149 * s), size = Size(20 * s, 32 * s))
-        drawCircle(v.bodyDark, radius = 2 * s, center = Offset(x * s, 172 * s))
+    listOf(55f, 78f, 100f, 122f, 145f).forEachIndexed { i, x ->
+        val dy = sin(phase + i * 0.8f) * 2.8f
+        val dx = sin(phase * 0.5f + i * 0.5f) * 1.4f
+        drawOval(v.body, topLeft = Offset((x - 10 + dx) * s, (149 + dy) * s), size = Size(20 * s, 32 * s))
+        drawCircle(v.bodyDark, radius = 2 * s, center = Offset((x + dx) * s, (172 + dy) * s))
     }
     val crown = Path().apply {
         moveTo(85 * s, 55 * s); lineTo(90 * s, 42 * s); lineTo(95 * s, 55 * s); close()
@@ -222,8 +319,8 @@ private fun DrawScope.drawFledgling(s: Float, mood: PetMood, v: OctoVariant) {
         moveTo(115 * s, 55 * s); lineTo(110 * s, 42 * s); lineTo(105 * s, 55 * s); close()
     }
     drawPath(crown, v.bodyDark)
-    drawEye(82f, 98f, 6f, mood, s)
-    drawEye(118f, 98f, 6f, mood, s)
+    drawEye(82f, 98f, 6f, mood, s, blink)
+    drawEye(118f, 98f, 6f, mood, s, blink)
     if (mood == PetMood.HAPPY || mood == PetMood.EXCITED) {
         drawCircle(v.cheek.copy(alpha = 0.7f), radius = 6 * s, center = Offset(70 * s, 115 * s))
         drawCircle(v.cheek.copy(alpha = 0.7f), radius = 6 * s, center = Offset(130 * s, 115 * s))
@@ -243,7 +340,7 @@ private fun DrawScope.drawFledgling(s: Float, mood: PetMood, v: OctoVariant) {
     }
 }
 
-private fun DrawScope.drawElder(s: Float, mood: PetMood, v: OctoVariant) {
+private fun DrawScope.drawElder(s: Float, mood: PetMood, v: OctoVariant, phase: Float, blink: Float) {
     drawOval(Color.Black.copy(alpha = 0.12f), topLeft = Offset(50 * s, 172 * s), size = Size(100 * s, 12 * s))
     val body = Path().apply {
         moveTo(35 * s, 100 * s)
@@ -255,9 +352,11 @@ private fun DrawScope.drawElder(s: Float, mood: PetMood, v: OctoVariant) {
     }
     drawPath(body, v.body)
     drawOval(v.belly, topLeft = Offset(58 * s, 96 * s), size = Size(84 * s, 68 * s))
-    listOf(48f, 72f, 100f, 128f, 152f).forEach { x ->
-        drawOval(v.body, topLeft = Offset((x - 11) * s, 152 * s), size = Size(22 * s, 36 * s))
-        drawCircle(v.bodyDark, radius = 2.5f * s, center = Offset(x * s, 178 * s))
+    listOf(48f, 72f, 100f, 128f, 152f).forEachIndexed { i, x ->
+        val dy = sin(phase + i * 0.7f) * 3f
+        val dx = sin(phase * 0.5f + i * 0.45f) * 1.6f
+        drawOval(v.body, topLeft = Offset((x - 11 + dx) * s, (152 + dy) * s), size = Size(22 * s, 36 * s))
+        drawCircle(v.bodyDark, radius = 2.5f * s, center = Offset((x + dx) * s, (178 + dy) * s))
     }
     val crown = Path().apply {
         moveTo(75 * s, 48 * s)
@@ -270,8 +369,8 @@ private fun DrawScope.drawElder(s: Float, mood: PetMood, v: OctoVariant) {
     drawCircle(CrownGoldLight, radius = 3 * s, center = Offset(100 * s, 35 * s))
     drawCircle(CrownGoldLight, radius = 2 * s, center = Offset(85 * s, 42 * s))
     drawCircle(CrownGoldLight, radius = 2 * s, center = Offset(115 * s, 42 * s))
-    drawEye(80f, 100f, 6f, mood, s)
-    drawEye(120f, 100f, 6f, mood, s)
+    drawEye(80f, 100f, 6f, mood, s, blink)
+    drawEye(120f, 100f, 6f, mood, s, blink)
     drawCircle(v.cheek.copy(alpha = 0.7f), radius = 7 * s, center = Offset(66 * s, 118 * s))
     drawCircle(v.cheek.copy(alpha = 0.7f), radius = 7 * s, center = Offset(134 * s, 118 * s))
     val mPath = if (mood == PetMood.HAPPY)
